@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tag Card Scanner</title>
+<meta name="theme-color" content="#2347C5">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: two-column workbench (tag photo left, parsed record right) from 880px; one column on phones. */
+:root {
+  --bg: #EDF1EF;
+  --surface: #FFFFFF;
+  --surface-2: #E1E8E5;
+  --ink: #0F1A16;
+  --ink-2: #485650;
+  --line: #C9D3CF;
+  --accent: #2347C5;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #DCE3F8;
+  --ok: #14703C;
+  --ok-soft: #D5EDDD;
+  --warn: #85560A;
+  --warn-soft: #FAE6B3;
+  --font-body: "IBM Plex Sans Thai", "Noto Sans Thai", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C1210; --surface: #151D1A; --surface-2: #1E2824; --ink: #E6EEEA; --ink-2: #9BAAA4;
+    --line: #2C3A35; --accent: #8EA8FF; --accent-ink: #0B1230; --accent-soft: #1C2750;
+    --ok: #62D592; --ok-soft: #14301F; --warn: #F2C45E; --warn-soft: #3B2E0C;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C1210; --surface: #151D1A; --surface-2: #1E2824; --ink: #E6EEEA; --ink-2: #9BAAA4;
+  --line: #2C3A35; --accent: #8EA8FF; --accent-ink: #0B1230; --accent-soft: #1C2750;
+  --ok: #62D592; --ok-soft: #14301F; --warn: #F2C45E; --warn-soft: #3B2E0C;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 16px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 16px; }
+.top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+h1 { font-size: 20px; line-height: 1.2; margin: 0; font-weight: 600; letter-spacing: .01em; text-wrap: balance; }
+.sub { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; }
+.pill { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+.pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-2); flex: none; }
+.pill[data-s="ready"] i { background: var(--ok); }
+.pill[data-s="loading"] i, .pill[data-s="slow"] i { background: var(--warn); }
+.pill[data-s="failed"] i { background: var(--warn); }
+
+.beta { font-size: 11px; letter-spacing: .1em; padding: 2px 6px; border-radius: 3px; background: var(--warn-soft); color: var(--warn); vertical-align: middle; font-weight: 600; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill[data-s="ok"] i { background: var(--ok); }
+.pill[data-s="warn"] i { background: var(--warn); }
+.stack { display: grid; gap: 12px; min-width: 0; }
+.ph { position: absolute; inset: 14px; border: 2px dashed var(--line); border-radius: 6px; display: grid; place-content: center; gap: 6px; text-align: center; padding: 20px; color: var(--ink-2); font-size: 14px; }
+.ph b { color: var(--ink); font-size: 16px; font-weight: 600; }
+.setup { display: grid; gap: 12px; margin-top: 12px; }
+.row2 { display: flex; flex-wrap: wrap; gap: 8px; }
+.switch { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+@media (max-width: 879px) { .col-cap .actions { order: -1; } .btn.primary { min-height: 54px; font-size: 17px; } }
+.layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 880px) {
+  .layout { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); align-items: start; }
+  .col-cap { position: sticky; top: 16px; }
+}
+.col-cap, .col-res { display: grid; gap: 12px; min-width: 0; }
+
+.stage { position: relative; aspect-ratio: 3 / 4; max-width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.stage img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.busy { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px; padding: 24px; text-align: center; background: color-mix(in srgb, var(--bg) 82%, transparent); }
+.busy p { margin: 0; font-weight: 500; }
+.bar { width: min(260px, 70vw); height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 0 auto; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s linear; }
+
+.actions { display: grid; gap: 8px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; text-align: center;
+  min-height: 46px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.quiet { background: transparent; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:focus-visible, .btn:has(input:focus-visible), .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.btn { position: relative; }
+.hint { margin: 0; font-size: 13px; color: var(--ink-2); }
+.msg { margin: 0; padding: 10px 12px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 13px; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 12px; min-width: 0; }
+.mode { margin: 0; font-size: 13px; padding: 8px 12px; border-radius: 6px; background: var(--accent-soft); color: var(--ink); }
+.mode b { font-weight: 600; }
+h2 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+.h2sub { margin: 2px 0 0; font-size: 13px; color: var(--ink-2); }
+
+.ribbon { display: flex; gap: 2px; min-width: 0; }
+.seg { min-width: 0; padding: 5px 4px 6px; border-radius: 3px; display: grid; gap: 1px; text-align: center; }
+.seg small { font-size: 9px; letter-spacing: .08em; color: var(--ink-2); font-weight: 500; }
+.seg b { font-family: var(--font-data); font-weight: 500; font-size: clamp(10px, 3vw, 14px); letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+.seg.a { background: var(--accent-soft); }
+.seg.b { background: var(--surface-2); }
+.seg.x { border: 1px dashed var(--ink-2); }
+.decoded { margin: 0; font-size: 13px; color: var(--ink-2); font-family: var(--font-data); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.grid2 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field.wide { grid-column: 1 / -1; }
+.field .lab { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 12px; letter-spacing: .05em; color: var(--ink-2); font-weight: 500; }
+.field input {
+  width: 100%; min-width: 0; font-family: var(--font-data); font-size: 16px; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.field[data-s="warn"] input { border-color: var(--warn); background: var(--warn-soft); }
+.field .note { font-size: 12px; color: var(--ink-2); min-height: 1.4em; }
+.field[data-s="warn"] .note { color: var(--warn); }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 1px 7px; border-radius: 3px; background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.chip[data-s="ok"] { background: var(--ok-soft); color: var(--ok); }
+.chip[data-s="warn"] { background: var(--warn-soft); color: var(--warn); }
+.chip[data-s="edited"] { background: var(--accent-soft); color: var(--accent); }
+
+.cmp { display: grid; gap: 0; font-family: var(--font-data); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.cr { display: grid; grid-template-columns: 74px minmax(0, 1fr) minmax(0, 1fr) 22px; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); align-items: center; }
+.cr.hd { border-top: 0; font-family: var(--font-body); font-size: 12px; color: var(--ink-2); padding-top: 0; }
+.cr .l { font-family: var(--font-body); font-size: 12px; color: var(--ink-2); }
+.cr .v { overflow-wrap: anywhere; }
+.cr .m { text-align: center; font-weight: 600; }
+.cr[data-s="match"] .m { color: var(--ok); }
+.cr[data-s="diff"] .m { color: var(--warn); }
+.cr[data-s="diff"] { background: var(--warn-soft); }
+#secFields { margin-top: 12px; }
+.keep { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 14px; }
+.keep input { width: 18px; height: 18px; accent-color: var(--accent); }
+.confirm { position: sticky; bottom: env(safe-area-inset-bottom, 0px); display: grid; gap: 8px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.confirm .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.confirm .sum { font-size: 14px; }
+.sum b { font-variant-numeric: tabular-nums; }
+.dup { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 13px; }
+
+.logrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); font-family: var(--font-data); font-size: 13px; font-variant-numeric: tabular-nums; }
+.logrow .t { color: var(--ink-2); }
+.logrow .s { color: var(--ink-2); grid-column: 2 / -1; font-size: 12px; overflow-wrap: anywhere; }
+.logbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.empty { margin: 0; font-size: 13px; color: var(--ink-2); }
+details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+pre.raw { margin: 8px 0 0; padding: 10px; background: var(--bg); border-radius: 6px; overflow-x: auto; font-family: var(--font-data); font-size: 12px; line-height: 1.5; white-space: pre; max-width: 100%; }
+textarea.tsv { width: 100%; min-height: 90px; font-family: var(--font-data); font-size: 12px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; z-index: 20; }
+.foot { margin: 0; font-size: 12px; color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+
+/* ---- v2: live camera ---- */
+.stage { background: #0b0f0d; }
+.stage video { width: 100%; height: 100%; object-fit: cover; display: block; background: #0b0f0d; }
+.stage.mini { aspect-ratio: 16 / 6; }
+.stage.photo video { display: none; }
+.guide { position: absolute; inset: 7% 5%; border: 2px dashed rgba(255,255,255,.65); border-radius: 10px; pointer-events: none; transition: border-color .15s; }
+.stage.mini .guide { display: none; }
+.guide[data-s="found"] { border: 2px solid #62D592; }
+.guide[data-s="read"] { border: 2px solid #F2C45E; }
+.scanline { position: absolute; left: 5%; right: 5%; top: 7%; height: 2px; background: rgba(98,213,146,.85); box-shadow: 0 0 10px rgba(98,213,146,.8); animation: sweep 2.2s ease-in-out infinite alternate; pointer-events: none; }
+.stage[data-s="read"] .scanline, .stage[data-s="idle"] .scanline, .stage.mini .scanline, .stage.photo .scanline { display: none; }
+@keyframes sweep { from { top: 9%; } to { top: 90%; } }
+.stat { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 7px 10px; border-radius: 6px; background: rgba(8,12,10,.78); color: #fff; font-size: 14px; font-weight: 500; text-align: center; }
+.stat[data-s="found"] { background: rgba(20,112,60,.92); }
+.stat[data-s="read"] { background: rgba(133,86,10,.92); }
+.stage.mini .stat { display: none; }
+.stage .busy { background: rgba(8,12,10,.72); color: #fff; }
+.stage .bar { background: rgba(255,255,255,.3); }
+.stage .bar i { background: #62D592; }
+.camrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+@media (prefers-reduced-motion: reduce) { .scanline { animation: none; } }
+.mrow { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.mrow:first-of-type { border-top: 0; }
+.mrow .l { font-size: 12px; color: var(--ink-2); padding-top: 2px; }
+.mrow .v { overflow-wrap: anywhere; }
+.mrow .v.miss { color: var(--warn); }
+.sel { width: 100%; font: inherit; font-size: 15px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+.btn.row-btn { min-height: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Tag Card Scanner <span class="beta">v2</span></h1>
+      <p class="sub">เปิดกล้องแล้วถือแท็กให้เห็นทั้งใบ ระบบสแกนบาร์โค้ดและอ่านตัวอักษรเอง ภาพอ่านในเครื่อง ไม่ส่งให้ AI ภายนอก</p>
+    </div>
+    <div class="pills"><div class="pill" id="engine" data-s="idle" title=""><i></i><span id="engineTxt">เตรียมตัวอ่าน OCR</span></div><div class="pill" id="net" data-s="warn"><i></i><span id="netTxt">กำลังตรวจสถานะ</span></div></div>
+  </header>
+
+  <main class="layout">
+    <section class="col-cap" aria-label="กล้อง">
+      <div class="stage" id="stage" data-s="idle">
+        <video id="video" playsinline muted autoplay></video>
+        <img id="stageImg" alt="ภาพแท็กที่กำลังอ่าน" hidden>
+        <div class="guide" id="guide" data-s="idle"></div>
+        <div class="scanline"></div>
+        <div class="ph" id="ph" hidden><b>กล้องยังไม่เปิด</b><span>กด “เปิดกล้อง” หรือเลือกรูปจากเครื่อง</span></div>
+        <div class="stat" id="stat" data-s="idle">กำลังเตรียมกล้อง…</div>
+        <div class="busy" id="busy" hidden role="status">
+          <p id="busyTxt">กำลังอ่าน…</p>
+          <div class="bar"><i id="busyBar"></i></div>
+        </div>
+      </div>
+      <div class="camrow">
+        <button class="btn primary" id="camBtn" type="button">เปิดกล้อง</button>
+        <button class="btn" id="torchBtn" type="button" hidden>ไฟฉาย</button>
+        <label class="btn">ถ่ายรูป / เลือกรูป
+          <input type="file" id="pick" accept="image/*">
+        </label>
+      </div>
+      <p class="hint">ถือให้เห็นแท็กทั้งใบ ตัวหนังสือตรง ไม่มีแสงสะท้อน แล้วนิ่งสักครู่ ระบบจะจับบาร์โค้ดและอ่านให้เอง ไม่ต้องกดถ่าย</p>
+      <p class="msg" id="msg" hidden role="alert"></p>
+    </section>
+
+    <section class="col-res" aria-label="ผลการอ่าน">
+      <p class="mode" id="mode"><b>พร้อมสแกน</b> เล็งบาร์โค้ดบนแท็กใบแรก</p>
+
+      <div class="stack" id="resWrap" hidden>
+      <div class="panel">
+        <div>
+          <h2>บาร์โค้ด</h2>
+          <p class="h2sub" id="ribbonSrc"></p>
+        </div>
+        <div id="ribbon"></div>
+        <p class="decoded" id="decoded"></p>
+      </div>
+
+      <div class="panel" id="fields"></div>
+
+      <div class="panel" id="masterBox"></div>
+
+      <div class="panel">
+        <div>
+          <h2>เทียบ 2 แหล่งข้อมูล</h2>
+          <p class="h2sub">✓ ตรงกัน · ≠ ไม่ตรงกัน ให้ดูแท็กอีกครั้ง</p>
+        </div>
+        <div class="cmp" id="cmp"></div>
+      </div>
+
+      <div class="confirm" id="confirmBar">
+        <p class="dup" id="dup" hidden></p>
+        <div class="row">
+          <span class="sum" id="sum"></span>
+          <span class="row2"><button class="btn quiet" id="redoBtn" type="button">อ่านใหม่</button><button class="btn primary" id="confirmBtn" type="button">ยืนยันและบันทึก</button></span>
+        </div>
+      </div>
+      </div>
+
+      <div class="panel">
+        <div>
+          <h2>รายการที่บันทึกแล้ว</h2>
+          <p class="h2sub" id="logCount"></p>
+        </div>
+        <div id="logList"></div>
+        <div class="logbar">
+          <button class="btn" id="syncBtn" type="button">ส่งที่ค้างอยู่</button>
+          <button class="btn quiet" id="copyBtn" type="button">คัดลอกเป็นตาราง</button>
+          <button class="btn quiet" id="clearBtn" type="button">ล้างที่ส่งแล้ว</button>
+        </div>
+        <textarea class="tsv" id="tsvBox" hidden readonly aria-label="ข้อความตารางสำหรับคัดลอก"></textarea>
+      </div>
+
+      <details class="panel" id="setup">
+        <summary>ตั้งค่าและทดสอบ</summary>
+        <div class="setup">
+          <div class="field"><label class="lab" for="user"><span>ชื่อผู้สแกน</span></label>
+            <input id="user" autocomplete="off" placeholder="ชื่อเล่น หรือรหัสพนักงาน"><span class="note">บันทึกไปกับทุกรายการ</span></div>
+          <div class="field"><label class="lab" for="endpoint"><span>ลิงก์ Google Apps Script (/exec)</span></label>
+            <input id="endpoint" autocomplete="off" inputmode="url" placeholder="ตั้งใน config.js แล้ว ไม่ต้องกรอกซ้ำ"><span class="note" id="epNote"></span></div>
+          <div class="field"><label class="lab" for="photoMode"><span>เก็บรูปแท็ก</span></label>
+            <select id="photoMode" class="sel">
+              <option value="edit">เฉพาะใบที่ต้องแก้ค่า หรือระบบอ่านไม่ครบ (แนะนำ)</option>
+              <option value="off">ไม่เก็บเลย</option>
+              <option value="always">เก็บทุกใบ (กินพื้นที่ Drive)</option>
+            </select></div>
+          <div class="row2"><button class="btn" id="pingBtn" type="button">ทดสอบการเชื่อมต่อ</button><button class="btn" id="masterBtn" type="button">โหลด Master ใหม่</button><button class="btn quiet" id="sampleBtn" type="button">ลองอ่านแท็กตัวอย่าง</button></div>
+          <p class="h2sub" id="masterTxt"></p>
+          <p class="h2sub" id="verTxt"></p>
+        </div>
+      </details>
+
+      <details class="panel">
+        <summary>ข้อความดิบที่ OCR อ่านได้</summary>
+        <pre class="raw" id="raw"></pre>
+      </details>
+      <p class="foot">ข้อมูลที่ยังส่งไม่สำเร็จจะค้างในเครื่องนี้และส่งเองเมื่อมีสัญญาณ</p>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script src="config.js"></script>
+<script src="vendor/zxing.js"></script>
+<script src="tess/tesseract.min.js"></script>
+<script src="parser.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
