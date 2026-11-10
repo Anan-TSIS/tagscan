@@ -1,6 +1,6 @@
 /* Service worker: เปิดแอปและสแกนได้แม้ไม่มีสัญญาณ (หลังเปิดครั้งแรกตอนมีเน็ต)
    ถ้าแก้ไฟล์ใดแล้วอัปโหลดใหม่ ให้เปลี่ยนเลขเวอร์ชันด้านล่าง เพื่อให้มือถือดึงไฟล์ชุดใหม่ */
-var VERSION = 'tagscan-v2-4';
+var VERSION = 'tagscan-v2-5';
 var PRECACHE = [
   './', 'index.html', 'app.js', 'parser.js', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'sample.jpg',
   'zxing.js', 'tesseract.min.js', 'worker.min.js',

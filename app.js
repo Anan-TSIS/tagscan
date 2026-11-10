@@ -487,7 +487,11 @@ function updateNet(txt) {
 
 /* ================= sync to Google Sheets (Apps Script) ================= */
 var syncing = false;
+var APP_VER = 'v2-0.3';
 function postJSON(ep, obj) {
+  if (!/^http:\/\/(127\.0\.0\.1|localhost)[:\/]/.test(ep) && !/^https:\/\/script\.google(usercontent)?\.com\/macros\/s\/[^\/]+\/exec$/.test(ep)) {
+    return Promise.reject(new Error('ลิงก์ Apps Script ไม่ถูกต้อง: "' + String(ep).slice(0, 60) + '" ต้องขึ้นต้น https://script.google.com/macros/s/ และลงท้าย /exec (ดูช่องลิงก์ใน ตั้งค่าและทดสอบ และ endpoint ใน config.js)'));
+  }
   var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 45000);
   return fetch(ep, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(obj), signal: ctl.signal, redirect: 'follow' })
     .then(function (r) {
@@ -579,7 +583,8 @@ $('user').addEventListener('input', function () { lsSet('tagscan-user', $('user'
 $('endpoint').addEventListener('input', function () { lsSet('tagscan-endpoint', $('endpoint').value.trim()); updateNet(); });
 $('endpoint').addEventListener('change', function () { syncPending(); fetchMaster(false); });
 $('photoMode').addEventListener('change', function () { lsSet('tagscan-photomode', $('photoMode').value); });
-$('verTxt').textContent = 'เวอร์ชัน ' + (CFG.version || 'v2');
+$('verTxt').textContent = 'เวอร์ชัน ' + APP_VER + ' · ลิงก์ที่ใช้: ' + (endpoint() || '(ว่าง)');
+var vb = document.querySelector('h1 .beta'); if (vb) vb.textContent = APP_VER;
 if (!$('user').value) $('setup').open = true;
 window.addEventListener('online', function () { syncPending(); fetchMaster(false); });
 window.addEventListener('offline', function () { updateNet(); });
