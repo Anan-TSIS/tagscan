@@ -1,12 +1,11 @@
 /* Service worker: เปิดแอปและสแกนได้แม้ไม่มีสัญญาณ (หลังเปิดครั้งแรกตอนมีเน็ต)
    ถ้าแก้ไฟล์ใดแล้วอัปโหลดใหม่ ให้เปลี่ยนเลขเวอร์ชันด้านล่าง เพื่อให้มือถือดึงไฟล์ชุดใหม่ */
-var VERSION = 'tagscan-v2-1';
+var VERSION = 'tagscan-v2-3';
 var PRECACHE = [
   './', 'index.html', 'app.js', 'parser.js', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'sample.jpg',
-  'vendor/zxing.js',
-  'tess/tesseract.min.js', 'tess/worker.min.js',
-  'tess/tesseract-core-lstm.wasm.js', 'tess/tesseract-core-simd-lstm.wasm.js',
-  'tess/eng.lang.wasm'
+  'zxing.js', 'tesseract.min.js', 'worker.min.js',
+  'tesseract-core-lstm.wasm.js', 'tesseract-core-simd-lstm.wasm.js',
+  'eng.lang.wasm'
 ];
 
 self.addEventListener('install', function (e) {
@@ -26,7 +25,7 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  var heavy = url.pathname.indexOf('/tess/') >= 0 || url.pathname.indexOf('/vendor/') >= 0 || /icon-|sample\.jpg/.test(url.pathname);
+  var heavy = /(zxing|tesseract|worker\.min|eng\.lang)|icon-|sample\.jpg/.test(url.pathname);
   if (heavy) {
     e.respondWith(caches.match(req, { ignoreSearch: true }).then(function (r) { return r || fetch(req).then(function (res) { return keep(req, res); }); }));
     return;

@@ -3,7 +3,7 @@
 'use strict';
 
 var CFG = window.TAGSCAN_CONFIG || {};
-var TESS_DIR = new URL('tess/', document.baseURI).href;
+var TESS_DIR = new URL('./', document.baseURI).href;   // engine files sit next to index.html (no sub-folders)
 var OCR_MAX_SIDE = CFG.ocrMaxSide || 2400;       // long side of the frame sent to OCR
 var VIDEO_W = CFG.videoWidth || 3840, VIDEO_H = CFG.videoHeight || 2160;   // asked from the camera, phone gives what it can
 var MAX_FRAMES = CFG.maxFrames || 3;              // OCR attempts per tag when a main field is missing
@@ -63,8 +63,8 @@ function primeLang() {
   }).catch(function () { /* fall back to eng.traineddata.gz */ });
 }
 function initEngine() {
-  if (typeof Tesseract === 'undefined') { state.err = '(โหลด tesseract.min.js ไม่ได้)'; setEngine('failed'); return; }
-  setEngine('loading');
+  if (typeof Tesseract === 'undefined') { state.err = '(โหลด tesseract.min.js ไม่ได้)'; setEngine('failed'); showMsg(problemText()); diag(); return; }
+  setEngine('loading'); diag();
   var slow = setTimeout(function () { if (state.engine === 'loading') setEngine('slow'); }, 20000);
   state.workerP = primeLang().then(function () {
     return Tesseract.createWorker('eng', 1, {
@@ -72,8 +72,8 @@ function initEngine() {
       logger: function (m) { if (progressCb) progressCb(m); }
     });
   });
-  state.workerP.then(function (w) { state.worker = w; clearTimeout(slow); setEngine('ready'); })
-    .catch(function (e) { clearTimeout(slow); state.err = '(' + String(e && (e.message || e)).slice(0, 100) + ')'; setEngine('failed'); });
+  state.workerP.then(function (w) { state.worker = w; clearTimeout(slow); setEngine('ready'); diag(); })
+    .catch(function (e) { clearTimeout(slow); state.err = '(' + String(e && (e.message || e)).slice(0, 100) + ')'; setEngine('failed'); showMsg(problemText()); diag(); });
 }
 function ocr(canvas) {
   if (state.engine === 'failed' || !state.workerP) return Promise.resolve('');
@@ -94,6 +94,7 @@ function initZX() {
     hints.set(Z.DecodeHintType.TRY_HARDER, true);
     zx = new Z.MultiFormatReader(); zx.setHints(hints);
   } catch (e) { zx = null; }
+  if (!zx) showMsg(problemText());
 }
 function decodeCanvas(c) {
   if (!zx) return null;
@@ -123,6 +124,19 @@ function decodeAny(canvas) {
 }
 function jpeg(canvas, side, q) {
   try { return scaled(canvas, canvas.width, canvas.height, side).toDataURL('image/jpeg', q); } catch (e) { return ''; }
+}
+
+/* ================= problems + diagnostics ================= */
+function problemText() {
+  var p = [];
+  if (!zx) p.push('ตัวถอดบาร์โค้ดไม่พร้อม (ไม่พบไฟล์ zxing.js ตรวจว่าอัปโหลดไฟล์นี้ขึ้น GitHub แล้ว)');
+  if (state.engine === 'failed') p.push('ตัวอ่าน OCR โหลดไม่สำเร็จ ' + state.err + ' (ตรวจว่าอัปโหลดไฟล์ tesseract.min.js, worker.min.js, tesseract-core-*.wasm.js, eng.lang.wasm ขึ้น GitHub ครบ)');
+  return p.join(' · ');
+}
+function diag() {
+  var v = $('video');
+  $('diagTxt').textContent = 'ZXing: ' + (zx ? 'พร้อม' : 'ไม่พร้อม') + ' · OCR: ' + state.engine + (state.err ? ' ' + state.err : '') +
+    ' · กล้อง: ' + (cam.running && v.videoWidth ? v.videoWidth + 'x' + v.videoHeight : 'ปิด') + ' · เฟรมอ่าน OCR สูงสุด ' + OCR_MAX_SIDE + ' px';
 }
 
 /* ================= UI helpers ================= */
@@ -159,7 +173,7 @@ function startCamera() {
           if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) cam.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
           $('torchBtn').hidden = !caps.torch;
         } catch (e) {}
-        $('camBtn').textContent = 'ปิดกล้อง';
+        $('camBtn').textContent = 'ปิดกล้อง'; diag();
         if (phase !== 'result') { phase = 'scan'; setStat('เล็งบาร์โค้ดให้อยู่ในกรอบ', 'idle'); }
         scheduleTick(200);
       });
@@ -239,6 +253,11 @@ function runPhoto(src, mode) {
     $('stage').classList.add('photo'); $('stageImg').src = jpeg(canvas, 1000, 0.8); $('stageImg').hidden = false; $('ph').hidden = true;
     var bc = decodeAny(canvas);
     return ocr(canvas).then(function (text) {
+      if (!bc && !String(text).trim()) {
+        clearBusy(); phase = 'idle'; backToScan('<b>อ่านไม่ได้</b>');
+        showMsg(problemText() || 'ไม่พบบาร์โค้ดและอ่านตัวอักษรไม่ได้ ลองถ่ายให้ชัดและเห็นทั้งใบ');
+        return;
+      }
       var res = parseTag(text, { barcodeValue: bc });
       clearBusy();
       render(res, { mode: mode || 'photo', ms: performance.now() - t0, rawText: text, photo: jpeg(canvas, 1200, 0.6), frames: 1, bcValue: bc || '' });
@@ -359,13 +378,12 @@ function render(res, meta) {
   $('resWrap').hidden = false;
   renderMaster();
   phase = 'result';
-  $('stage').classList.add('mini');
-  setStat('', 'idle');
+  setStat('อ่านเสร็จแล้ว ดูผลและกดยืนยันด้านล่าง ↓', 'done');
   if (window.matchMedia('(max-width: 879px)').matches) $('mode').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function backToScan(msg) {
   $('resWrap').hidden = true;
-  $('stage').classList.remove('mini', 'photo'); $('stageImg').hidden = true;
+  $('stage').classList.remove('photo'); $('stageImg').hidden = true;
   current = null;
   if (msg) $('mode').innerHTML = msg;
   window.scrollTo(0, 0);
@@ -555,7 +573,7 @@ setInterval(syncPending, 60000);
 setInterval(function () { fetchMaster(false); }, 10 * 60000);
 
 loadMasterLocal();
-initZX();
+initZX(); diag();
 renderLog(); updateNet();
 openDB().then(dbAll).then(function (rows) {
   log = (rows || []).sort(function (a, b) { return b.ts_ms - a.ts_ms; });
