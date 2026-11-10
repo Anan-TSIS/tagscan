@@ -462,7 +462,7 @@ function onConfirm() {
 function chipFor(r) {
   if (r.status === 'sent') return r.dup === 'Y' ? ['warn', 'ส่งแล้ว · ซ้ำ'] : ['ok', 'ส่งแล้ว'];
   if (r.status === 'error') return ['warn', 'ส่งไม่ได้'];
-  return ['warn', 'รอส่ง'];
+  return ['warn', r.err ? 'รอส่ง ⚠' : 'รอส่ง'];
 }
 function renderLog() {
   var pend = pendingCount();
@@ -490,7 +490,21 @@ var syncing = false;
 function postJSON(ep, obj) {
   var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 45000);
   return fetch(ep, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(obj), signal: ctl.signal, redirect: 'follow' })
-    .then(function (r) { clearTimeout(t); return r.json(); });
+    .then(function (r) {
+      clearTimeout(t);
+      return r.text().then(function (txt) {
+        try { return JSON.parse(txt); } catch (e) {
+          var head = String(txt).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90);
+          var er = new Error('เซิร์ฟเวอร์ไม่ตอบเป็น JSON (HTTP ' + r.status + ') ' + head +
+            ' → ตรวจ Deploy: สิทธิ์เข้าถึง=ทุกคน, Deploy เวอร์ชันใหม่, รัน setup() แล้ว');
+          er.http = true; throw er;
+        }
+      });
+    }, function (e) {
+      clearTimeout(t);
+      var er = new Error(e && e.name === 'AbortError' ? 'หมดเวลา 45 วินาที ไม่มีคำตอบ' : 'ติดต่อเซิร์ฟเวอร์ไม่ได้ (' + ((e && e.message) || 'network') + ') → ตรวจลิงก์ /exec และสัญญาณ');
+      er.net = true; throw er;
+    });
 }
 function syncPending() {
   var ep = endpoint();
@@ -505,7 +519,7 @@ function syncPending() {
         if (r && r.ok) { rec.status = 'sent'; rec.dup = r.dup ? 'Y' : ''; rec.row = r.row; rec.photo = ''; rec.err = ''; }
         else { rec.status = 'error'; rec.err = (r && r.error) || 'ไม่ทราบสาเหตุ'; }
         return dbPut(rec);
-      }).catch(function () { rec.status = 'pending'; rec.err = ''; return dbPut(rec); });
+      }).catch(function (e) { rec.status = 'pending'; rec.err = (e && e.message) || 'ส่งไม่สำเร็จ'; return dbPut(rec); });
     });
   });
   return chain.then(function () { syncing = false; renderLog(); updateNet(); });
@@ -517,7 +531,7 @@ function onPing() {
   postJSON(ep, { token: CFG.token || '', action: 'ping' }).then(function (j) {
     note.textContent = j.ok ? 'เชื่อมต่อได้ ชีต ' + j.sheet + ' มี ' + j.rows + ' แถว' : 'เชื่อมต่อได้แต่ถูกปฏิเสธ: ' + (j.error || '');
     if (j.ok) fetchMaster(false);
-  }).catch(function () { note.textContent = 'เชื่อมต่อไม่ได้ ตรวจลิงก์และสัญญาณ'; });
+  }).catch(function (e) { note.textContent = 'เชื่อมต่อไม่ได้: ' + ((e && e.message) || ''); });
 }
 
 var LOG_COLS = ['ts', 'user', 'barcode', 'mat', 'batch', 'seq', 'seqTotal', 'qty', 'prodNo', 'prodDate', 'sender', 'edited', 'status'];
