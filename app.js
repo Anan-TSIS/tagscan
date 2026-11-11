@@ -417,7 +417,7 @@ function dbAll() { return dbDo('readonly', function (st) { return st.getAll(); }
 function pad(n) { return String(n).padStart(2, '0'); }
 function stamp(d) { return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
 function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-function endpoint() { return (($('endpoint').value || '').trim()) || CFG.endpoint || ''; }
+function endpoint() { var v = ($('endpoint').value || '').trim(); return (/^https?:\/\//.test(v) ? v : '') || CFG.endpoint || ''; }
 function pendingCount() { return log.filter(function (r) { return r.status !== 'sent'; }).length; }
 function getValues() { var v = {}; ALL_KEYS.forEach(function (k) { v[k] = $('f-' + k).value.trim(); }); return v; }
 
@@ -487,7 +487,7 @@ function updateNet(txt) {
 
 /* ================= sync to Google Sheets (Apps Script) ================= */
 var syncing = false;
-var APP_VER = 'v2-0.3';
+var APP_VER = 'v2-0.5';
 function postJSON(ep, obj) {
   if (!/^http:\/\/(127\.0\.0\.1|localhost)[:\/]/.test(ep) && !/^https:\/\/script\.google(usercontent)?\.com\/macros\/s\/[^\/]+\/exec$/.test(ep)) {
     return Promise.reject(new Error('ลิงก์ Apps Script ไม่ถูกต้อง: "' + String(ep).slice(0, 60) + '" ต้องขึ้นต้น https://script.google.com/macros/s/ และลงท้าย /exec (ดูช่องลิงก์ใน ตั้งค่าและทดสอบ และ endpoint ใน config.js)'));

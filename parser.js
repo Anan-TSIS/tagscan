@@ -87,7 +87,15 @@ function parseTag(text, opts) {
   }
 
   // PROD.NO: any 11 digits
-  ocr.prodNo = g(/PROD\.?\s*NO[.:\s]*([0-9OoIlS]{11})(?![0-9])/i, true) || g(/\b(\d{11})\b/);
+  // an 11-digit run that is just a slice of the barcode / its digit line is not the PROD.NO
+  var bcAll = String(opts.barcodeValue || '').replace(/\D/g, '') + String(digitsLine || '').replace(/\D/g, '');
+  function notBarcodeSlice(v) { return v && !(bcAll && bcAll.indexOf(v) >= 0); }
+  var pnCands = [], pnRe = /PROD\.?\s*NO[.:\s]*([0-9OoIlS]{11})(?![0-9])/ig, pm;
+  while ((pm = pnRe.exec(t))) pnCands.push(fixDigits(pm[1]));
+  var pnRe2 = /(?:^|[^0-9])(\d{11})(?![0-9])/g;
+  while ((pm = pnRe2.exec(t))) pnCands.push(pm[1]);
+  ocr.prodNo = '';
+  for (var pi = 0; pi < pnCands.length; pi++) { if (notBarcodeSlice(pnCands[pi])) { ocr.prodNo = pnCands[pi]; break; } }
 
   // SENDER: 8 digits starting with the prefix. Labels appear twice on the tag (one is only a heading), so also scan all tokens.
   ocr.sender = '';
