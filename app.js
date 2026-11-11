@@ -96,12 +96,22 @@ function initZX() {
   } catch (e) { zx = null; }
   if (!zx) showMsg(problemText());
 }
+var lastHit = null, bcBox = null;      // bcBox: barcode scan row in VIDEO pixels {x1,x2,y}
 function decodeCanvas(c) {
+  lastHit = null;
   if (!zx) return null;
   try {
     var Z = window.ZXing;
     var r = zx.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(c))));
     var d = String(r.getText()).replace(/\D/g, '');
+    lastHit = null;
+    try {
+      var pts = r.getResultPoints(), md = r.getResultMetadata && r.getResultMetadata(), ori = md && md.get ? md.get(Z.ResultMetadataType.ORIENTATION) : 0;
+      if (pts && pts.length >= 2 && !ori) {
+        var xs = pts.map(function (q) { return q.getX(); }), ys = pts.map(function (q) { return q.getY(); });
+        lastHit = { x1: Math.min.apply(null, xs), x2: Math.max.apply(null, xs), y: ys.reduce(function (a, b) { return a + b; }, 0) / ys.length };
+      }
+    } catch (e2) { lastHit = null; }
     return d.length >= 32 && d.length <= 35 ? d : null;
   } catch (e) { return null; }
 }
@@ -117,7 +127,9 @@ function decodeVideoFrame(v) {
   var s = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
   smallCv.width = Math.round(v.videoWidth * s); smallCv.height = Math.round(v.videoHeight * s);
   smallCv.getContext('2d').drawImage(v, 0, 0, smallCv.width, smallCv.height);
-  return decodeCanvas(smallCv);
+  var d = decodeCanvas(smallCv);
+  if (d && lastHit) bcBox = { x1: lastHit.x1 / s, x2: lastHit.x2 / s, y: lastHit.y / s }; else if (d) bcBox = null;
+  return d;
 }
 function decodeAny(canvas) {
   return decodeCanvas(scaled(canvas, canvas.width, canvas.height, 1280)) || decodeCanvas(canvas);
@@ -174,7 +186,7 @@ function startCamera() {
           $('torchBtn').hidden = !caps.torch;
         } catch (e) {}
         $('camBtn').textContent = 'ปิดกล้อง'; diag();
-        if (phase !== 'result') { phase = 'scan'; setStat('เล็งบาร์โค้ดให้อยู่ในกรอบ', 'idle'); }
+        if (phase !== 'result') { phase = 'scan'; setStat('เล็งบาร์โค้ดให้อยู่ในแถบ', 'idle'); }
         scheduleTick(200);
       });
     })
@@ -191,12 +203,54 @@ function stopCamera(quiet) {
   $('video').srcObject = null; $('torchBtn').hidden = true; $('camBtn').textContent = 'เปิดกล้อง';
   if (!quiet) { phase = 'idle'; setStat('กล้องปิดอยู่', 'idle'); }
 }
+
+/* ---- aiming aid: barcode window (cropped, higher-res decode) + live quality hint ---- */
+var BAND = { y0: 0.14, y1: 0.64 };            // vertical band of the stage that holds the barcode window
+function stageRectToVideo(v, fx0, fy0, fx1, fy1) {
+  var st = $('stage'), sw = st.clientWidth || 1, sh = st.clientHeight || 1, vw = v.videoWidth, vh = v.videoHeight;
+  var sc = Math.max(sw / vw, sh / vh), ox = (vw * sc - sw) / 2, oy = (vh * sc - sh) / 2;
+  var x = Math.max(0, (fx0 * sw + ox) / sc), y = Math.max(0, (fy0 * sh + oy) / sc);
+  var w = Math.min(vw - x, ((fx1 - fx0) * sw) / sc), h = Math.min(vh - y, ((fy1 - fy0) * sh) / sc);
+  return { x: x, y: y, w: Math.max(1, w), h: Math.max(1, h) };
+}
+var bandCv = null;
+function decodeVideoBand(v) {
+  var r = stageRectToVideo(v, 0, BAND.y0, 1, BAND.y1), s = Math.min(1, 1800 / r.w);
+  if (!bandCv) bandCv = document.createElement('canvas');
+  bandCv.width = Math.max(1, Math.round(r.w * s)); bandCv.height = Math.max(1, Math.round(r.h * s));
+  bandCv.getContext('2d').drawImage(v, r.x, r.y, r.w, r.h, 0, 0, bandCv.width, bandCv.height);
+  var d = decodeCanvas(bandCv);
+  if (d && lastHit) bcBox = { x1: r.x + lastHit.x1 / s, x2: r.x + lastHit.x2 / s, y: r.y + lastHit.y / s }; else if (d) bcBox = null;
+  return d;
+}
+var qCv = null;
+function frameQuality(v) {
+  try {
+    var r = stageRectToVideo(v, 0.05, BAND.y0, 0.95, BAND.y1);
+    if (!qCv) qCv = document.createElement('canvas');
+    qCv.width = 320; qCv.height = Math.max(40, Math.round(320 * r.h / r.w));
+    var x = qCv.getContext('2d', { willReadFrequently: true });
+    x.drawImage(v, r.x, r.y, r.w, r.h, 0, 0, qCv.width, qCv.height);
+    var d = x.getImageData(0, 0, qCv.width, qCv.height).data, w = qCv.width, h = qCv.height, g = new Float32Array(w * h), i, sum = 0, sq = 0;
+    for (i = 0; i < w * h; i++) { var l = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]; g[i] = l; sum += l; sq += l * l; }
+    var mean = sum / (w * h), sd = Math.sqrt(Math.max(0, sq / (w * h) - mean * mean)), gs = 0, n = 0, yy, xx;
+    for (yy = 0; yy < h - 1; yy++) for (xx = 0; xx < w - 1; xx++) { i = yy * w + xx; gs += Math.abs(g[i + 1] - g[i]) + Math.abs(g[i + w] - g[i]); n++; }
+    return { mean: mean, sharp: (gs / n) / (sd + 1) };
+  } catch (e) { return null; }
+}
+function aimHint() {
+  var q = frameQuality($('video'));
+  if (!q) return 'เล็งบาร์โค้ดให้อยู่ในแถบ';
+  if (q.mean < 60) return 'แสงน้อยเกินไป ลองเปิดไฟฉาย';
+  if (q.sharp < 0.2) return 'ภาพยังไม่คม ถือนิ่ง ๆ รอโฟกัส หรือถอยห่างจากแท็กอีกนิด';
+  return 'วางบาร์โค้ดในแถบเขียว ให้ยาวราว 80% ของกรอบ (ถือแท็กให้ขนานจอ)';
+}
 function scheduleTick(ms) { clearTimeout(cam.timer); cam.timer = setTimeout(tick, ms); }
 function tick() {
   if (!cam.running) return;
   var v = $('video');
   if (phase !== 'scan' || !v.videoWidth || document.hidden) { scheduleTick(300); return; }
-  var bc = decodeVideoFrame(v);
+  var bc = decodeVideoFrame(v) || decodeVideoBand(v);
   if (bc) {
     absent = 0;
     if (bc === lastDone && !seenAbsent) { setStat('ใบนี้เพิ่งบันทึกไป เอาแท็กออกแล้วเล็งใบถัดไป', 'idle'); }
@@ -208,7 +262,7 @@ function tick() {
   } else {
     absent++; lock.val = null; lock.n = 0;
     if (absent >= 5) seenAbsent = true;
-    setStat('เล็งบาร์โค้ดให้อยู่ในกรอบ', 'idle');
+    setStat(absent >= 3 ? aimHint() : 'เล็งบาร์โค้ดให้อยู่ในแถบ', 'idle');
   }
   scheduleTick(180);
 }
@@ -217,13 +271,34 @@ document.addEventListener('visibilitychange', function () {
   if (!document.hidden && cam.running) { $('video').play().catch(function () {}); scheduleTick(200); }
 });
 
+
+/* ---- OCR only the part of the tag we need: header + barcode + fields down to RECEIVER (ignore stickers/handwriting below) ---- */
+function ocrCropRect(v) {
+  if (!bcBox) return null;
+  var W = bcBox.x2 - bcBox.x1;
+  if (!(W > v.videoWidth * 0.18)) return null;      // too small to trust
+  var cx = (bcBox.x1 + bcBox.x2) / 2;
+  var x0 = Math.max(0, cx - 0.66 * W), x1 = Math.min(v.videoWidth, cx + 0.66 * W);
+  var y0 = Math.max(0, bcBox.y - 0.4 * W), y1 = Math.min(v.videoHeight, bcBox.y + 0.7 * W);
+  if (x1 - x0 < 200 || y1 - y0 < 150) return null;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+function cropCanvas(v, r, maxSide) {
+  var sc = Math.min(1.6, maxSide / Math.max(r.w, r.h)), c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(r.w * sc)); c.height = Math.max(1, Math.round(r.h * sc));
+  c.getContext('2d').drawImage(v, r.x, r.y, r.w, r.h, 0, 0, c.width, c.height);
+  return c;
+}
 /* ---- read: OCR 1..N frames of the locked tag ---- */
 function startRead(bc) {
   phase = 'read';
   setStat('กำลังอ่านตัวอักษรบนแท็ก ถือนิ่งไว้…', 'read');
   var v = $('video'), t0 = performance.now(), results = [], photos = [];
   function attempt() {
-    var canvas = scaled(v, v.videoWidth, v.videoHeight, OCR_MAX_SIDE);
+    // refresh the barcode position on the current frame, then crop to the tag area (last attempt falls back to the whole frame)
+    try { if (decodeVideoFrame(v) !== bc) decodeVideoBand(v); } catch (e) {}
+    var rect = results.length < MAX_FRAMES - 1 ? ocrCropRect(v) : null;
+    var canvas = rect ? cropCanvas(v, rect, OCR_MAX_SIDE) : scaled(v, v.videoWidth, v.videoHeight, OCR_MAX_SIDE);
     setBusy(results.length ? 'อ่านซ้ำอีกครั้ง…' : 'กำลังอ่านตัวอักษร…', 0);
     return ocr(canvas).then(function (text) {
       var res = parseTag(text, { barcodeValue: bc });
@@ -440,7 +515,7 @@ function onConfirm() {
   var rec = {};
   ALL_KEYS.forEach(function (k) { rec[k] = v[k]; });
   rec.id = newId(); rec.ts = stamp(now); rec.ts_ms = now.getTime(); rec.ts_iso = now.toISOString();
-  rec.user = user; rec.app = CFG.version || 'v2';
+  rec.user = user; rec.app = APP_VER;
   rec.device = navigator.userAgent.slice(0, 140);
   rec.ms = Math.round(current.meta.ms || 0); rec.mode = current.meta.mode;
   rec.bc_source = res.barcodeSource || '';
@@ -487,7 +562,7 @@ function updateNet(txt) {
 
 /* ================= sync to Google Sheets (Apps Script) ================= */
 var syncing = false;
-var APP_VER = 'v2-0.5';
+var APP_VER = 'v2-0.7';
 function postJSON(ep, obj) {
   if (!/^http:\/\/(127\.0\.0\.1|localhost)[:\/]/.test(ep) && !/^https:\/\/script\.google(usercontent)?\.com\/macros\/s\/[^\/]+\/exec$/.test(ep)) {
     return Promise.reject(new Error('ลิงก์ Apps Script ไม่ถูกต้อง: "' + String(ep).slice(0, 60) + '" ต้องขึ้นต้น https://script.google.com/macros/s/ และลงท้าย /exec (ดูช่องลิงก์ใน ตั้งค่าและทดสอบ และ endpoint ใน config.js)'));

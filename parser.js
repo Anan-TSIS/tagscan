@@ -81,9 +81,14 @@ function parseTag(text, opts) {
     var re = /([0-9OoIlS]{2})\s*[.\-\/]\s*([0-9OoIlS]{2})\s*[.\-\/]\s*([0-9OoIlS]{4})/g, m, found = '';
     while ((m = re.exec(t))) {
       var cand = fixDigits(m[1]) + '.' + fixDigits(m[2]) + '.' + fixDigits(m[3]);
-      if (validDate(cand, opts.now)) { found = cand; break; }
+      if (!validDate(cand, opts.now)) continue;
+      // the bottom stamp "D 06.11.2026 T 14:22:06" (LOCATION / DELIVERY line) is a delivery date, never PROD.DATE
+      var ls = t.lastIndexOf('\n', m.index) + 1, le = t.indexOf('\n', re.lastIndex); if (le < 0) le = t.length;
+      var line = t.slice(ls, le), after = t.slice(re.lastIndex, re.lastIndex + 14);
+      if (/LOCATION|DELIVERY|\bD\s*$/i.test(line.slice(0, m.index - ls + 2)) || /^\s*[TtI7]\s*\d{1,2}\s*[:.;]\s*\d{2}/.test(after)) continue;
+      found = cand; break;
     }
-    if (found) ocr.prodDate = found;
+    if (found) { ocr.prodDate = found; ocr.prodDateFallback = true; }
   }
 
   // PROD.NO: any 11 digits
@@ -153,6 +158,7 @@ function parseTag(text, opts) {
   else setField('prodNo', ocr.prodNo, 'warn', 'ต้องเป็นตัวเลข 11 หลัก');
 
   if (!ocr.prodDate) setField('prodDate', '', 'warn', 'อ่านไม่พบ');
+  else if (validDate(ocr.prodDate, opts.now) && ocr.prodDateFallback) setField('prodDate', ocr.prodDate, 'warn', 'ไม่เจอหัวข้อ PROD.DATE อ่านจากตำแหน่งอื่น ตรวจกับแท็กให้ดี');
   else if (validDate(ocr.prodDate, opts.now)) setField('prodDate', ocr.prodDate, 'ok', 'วันที่ถูกต้อง');
   else setField('prodDate', ocr.prodDate, 'warn', 'วันที่ไม่สมเหตุสมผล');
 
