@@ -186,7 +186,7 @@ function startCamera() {
           $('torchBtn').hidden = !caps.torch;
         } catch (e) {}
         $('camBtn').textContent = 'ปิดกล้อง'; diag();
-        if (phase !== 'result') { phase = 'scan'; setStat('เล็งบาร์โค้ดให้อยู่ในแถบ', 'idle'); }
+        if (phase !== 'result') { phase = 'scan'; setStat('เล็งให้เห็นบาร์โค้ดทั้งแถบ', 'idle'); }
         scheduleTick(200);
       });
     })
@@ -197,6 +197,7 @@ function startCamera() {
     });
 }
 function stopCamera(quiet) {
+  try { showHit(false); } catch (e) {}
   clearTimeout(cam.timer); cam.running = false;
   if (cam.stream) cam.stream.getTracks().forEach(function (t) { t.stop(); });
   cam.stream = null; cam.track = null; cam.torch = false;
@@ -212,6 +213,20 @@ function stageRectToVideo(v, fx0, fy0, fx1, fy1) {
   var x = Math.max(0, (fx0 * sw + ox) / sc), y = Math.max(0, (fy0 * sh + oy) / sc);
   var w = Math.min(vw - x, ((fx1 - fx0) * sw) / sc), h = Math.min(vh - y, ((fy1 - fy0) * sh) / sc);
   return { x: x, y: y, w: Math.max(1, w), h: Math.max(1, h) };
+}
+
+var hitEl = null;
+function showHit(on) {
+  if (!hitEl) hitEl = $('hit');
+  if (!hitEl) return;
+  if (!on || !bcBox) { hitEl.hidden = true; return; }
+  var v = $('video'), st = $('stage'), sw = st.clientWidth, sh = st.clientHeight, vw = v.videoWidth, vh = v.videoHeight;
+  if (!vw) { hitEl.hidden = true; return; }
+  var sc = Math.max(sw / vw, sh / vh), ox = (vw * sc - sw) / 2, oy = (vh * sc - sh) / 2, ex = barcodeExtent(v);
+  var top = ex ? ex.top : bcBox.y - 0.07 * barW(), bot = ex ? ex.bottom : bcBox.y + 0.07 * barW();
+  hitEl.style.left = (bcBox.x1 * sc - ox - 6) + 'px'; hitEl.style.width = ((bcBox.x2 - bcBox.x1) * sc + 12) + 'px';
+  hitEl.style.top = (top * sc - oy - 6) + 'px'; hitEl.style.height = ((bot - top) * sc + 12) + 'px';
+  hitEl.hidden = false;
 }
 var bandCv = null;
 function decodeVideoBand(v) {
@@ -240,10 +255,10 @@ function frameQuality(v) {
 }
 function aimHint() {
   var q = frameQuality($('video'));
-  if (!q) return 'เล็งบาร์โค้ดให้อยู่ในแถบ';
+  if (!q) return 'เล็งให้เห็นบาร์โค้ดทั้งแถบ';
   if (q.mean < 60) return 'แสงน้อยเกินไป ลองเปิดไฟฉาย';
   if (q.sharp < 0.2) return 'ภาพยังไม่คม ถือนิ่ง ๆ รอโฟกัส หรือถอยห่างจากแท็กอีกนิด';
-  return 'วางบาร์โค้ดในแถบเขียว ให้ยาวราว 80% ของกรอบ (ถือแท็กให้ขนานจอ)';
+  return 'ให้เห็นบาร์โค้ดทั้งแถบ ยาวราว 70-90% ของความกว้างจอ (ถือแท็กให้ขนานจอ)';
 }
 function scheduleTick(ms) { clearTimeout(cam.timer); cam.timer = setTimeout(tick, ms); }
 function tick() {
@@ -256,13 +271,13 @@ function tick() {
     if (bc === lastDone && !seenAbsent) { setStat('ใบนี้เพิ่งบันทึกไป เอาแท็กออกแล้วเล็งใบถัดไป', 'idle'); }
     else {
       if (bc === lock.val) lock.n++; else { lock.val = bc; lock.n = 1; }
-      setStat('เจอบาร์โค้ดแล้ว ถือนิ่งไว้…', 'found');
+      setStat('เจอบาร์โค้ดแล้ว ถือนิ่งไว้…', 'found'); showHit(true);
       if (lock.n >= 2) { startRead(bc); return; }
     }
   } else {
-    absent++; lock.val = null; lock.n = 0;
+    absent++; lock.val = null; lock.n = 0; showHit(false);
     if (absent >= 5) seenAbsent = true;
-    setStat(absent >= 3 ? aimHint() : 'เล็งบาร์โค้ดให้อยู่ในแถบ', 'idle');
+    setStat(absent >= 3 ? aimHint() : 'เล็งให้เห็นบาร์โค้ดทั้งแถบ', 'idle');
   }
   scheduleTick(180);
 }
@@ -273,18 +288,63 @@ document.addEventListener('visibilitychange', function () {
 
 
 /* ---- OCR only the part of the tag we need: header + barcode + fields down to RECEIVER (ignore stickers/handwriting below) ---- */
+var barW = function () { return bcBox ? bcBox.x2 - bcBox.x1 : 0; };
+// vertical extent of the bars (rows where the horizontal gradient is strong) around the decoded scan row, in VIDEO pixels
+function barcodeExtent(v) {
+  if (!bcBox) return null;
+  try {
+    var W = barW(), xa = bcBox.x1 + 0.1 * W, xb = bcBox.x2 - 0.1 * W, ya = Math.max(0, bcBox.y - 0.3 * W), yb = Math.min(v.videoHeight, bcBox.y + 0.3 * W);
+    if (xb - xa < 50 || yb - ya < 20) return null;
+    var cw = 300, sc = cw / (xb - xa), ch = Math.max(20, Math.round((yb - ya) * sc));
+    var c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    var x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(v, xa, ya, xb - xa, yb - ya, 0, 0, cw, ch);
+    var d = x.getImageData(0, 0, cw, ch).data, e = new Float32Array(ch), r, k;
+    for (r = 0; r < ch; r++) { var sum = 0, prev = d[r * cw * 4 + 1]; for (k = 1; k < cw; k++) { var g = d[(r * cw + k) * 4 + 1]; sum += Math.abs(g - prev); prev = g; } e[r] = sum / cw; }
+    var r0 = Math.min(ch - 1, Math.max(0, Math.round((bcBox.y - ya) * sc))), e0 = 0;
+    for (k = Math.max(0, r0 - 2); k <= Math.min(ch - 1, r0 + 2); k++) e0 = Math.max(e0, e[k]);
+    if (e0 < 12) return null;
+    var thr = e0 * 0.45, top = r0, bot = r0, gap;
+    for (gap = 0, r = r0; r >= 0 && gap < 3; r--) { if (e[r] > thr) { top = r; gap = 0; } else gap++; }
+    for (gap = 0, r = r0; r < ch && gap < 3; r++) { if (e[r] > thr) { bot = r; gap = 0; } else gap++; }
+    if (bot - top < 4) return null;
+    return { top: ya + top / sc, bottom: ya + (bot + 1) / sc };
+  } catch (e2) { return null; }
+}
+function clampRect(v, x0, y0, x1, y1) {
+  x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(v.videoWidth, x1); y1 = Math.min(v.videoHeight, y1);
+  return x1 - x0 < 120 || y1 - y0 < 40 ? null : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
 function ocrCropRect(v) {
   if (!bcBox) return null;
-  var W = bcBox.x2 - bcBox.x1;
+  var W = barW();
   if (!(W > v.videoWidth * 0.18)) return null;      // too small to trust
-  var cx = (bcBox.x1 + bcBox.x2) / 2;
-  var x0 = Math.max(0, cx - 0.66 * W), x1 = Math.min(v.videoWidth, cx + 0.66 * W);
-  var y0 = Math.max(0, bcBox.y - 0.4 * W), y1 = Math.min(v.videoHeight, bcBox.y + 0.7 * W);
-  if (x1 - x0 < 200 || y1 - y0 < 150) return null;
-  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  var cx = (bcBox.x1 + bcBox.x2) / 2, ex = barcodeExtent(v);
+  var top = ex ? ex.top : bcBox.y - 0.07 * W, bot = ex ? ex.bottom : bcBox.y + 0.07 * W;
+  return clampRect(v, cx - 0.66 * W, top - 0.27 * W, cx + 0.66 * W, bot + 0.58 * W);
 }
-function cropCanvas(v, r, maxSide) {
-  var sc = Math.min(1.6, maxSide / Math.max(r.w, r.h)), c = document.createElement('canvas');
+// the strip just above the barcode that holds "PROD.DATE: dd.mm.yyyy PLANT: ..."
+function dateStripRect(v) {
+  if (!bcBox) return null;
+  var W = barW(); if (!(W > v.videoWidth * 0.18)) return null;
+  var ex = barcodeExtent(v), top = ex ? ex.top : bcBox.y - 0.14 * W;
+  return clampRect(v, bcBox.x1 - 0.2 * W, top - 0.2 * W, bcBox.x1 + 0.46 * W, top - 0.004 * W);
+}
+function readDateStrip(v) {
+  var r = dateStripRect(v);
+  if (!r) return Promise.resolve('');
+  var c = cropCanvas(v, r, 1800, 3);
+  return ocr(c).then(function (text) {
+    var re = /([0-9OoIlS]{2})\s*[.\-\/,]\s*([0-9OoIlS]{2})\s*[.\-\/,]\s*([0-9OoIlS]{4})/g, m;
+    while ((m = re.exec(String(text || '')))) {
+      var cand = fixDigits(m[1]) + '.' + fixDigits(m[2]) + '.' + fixDigits(m[3]);
+      if (validDate(cand, new Date())) return cand;
+    }
+    return '';
+  }).catch(function () { return ''; });
+}
+function cropCanvas(v, r, maxSide, maxUp) {
+  var sc = Math.min(maxUp || 1.6, maxSide / Math.max(r.w, r.h)), c = document.createElement('canvas');
   c.width = Math.max(1, Math.round(r.w * sc)); c.height = Math.max(1, Math.round(r.h * sc));
   c.getContext('2d').drawImage(v, r.x, r.y, r.w, r.h, 0, 0, c.width, c.height);
   return c;
@@ -303,7 +363,14 @@ function startRead(bc) {
     return ocr(canvas).then(function (text) {
       var res = parseTag(text, { barcodeValue: bc });
       results.push(res); photos.push(jpeg(canvas, 1200, 0.6));
-      if (missingMain(res).length && results.length < MAX_FRAMES && state.engine === 'ready') return sleep(250).then(attempt);
+      var miss = missingMain(res);
+      // only the date is unsure -> read just the strip above the barcode (fast) instead of re-reading the whole tag
+      if (miss.length === 1 && miss[0] === 'prodDate' && state.engine === 'ready' && bcBox) {
+        return readDateStrip(v).then(function (dt) {
+          if (dt) { res.fields.prodDate = dt; res.status.prodDate = 'ok'; res.notes.prodDate = 'อ่านจากแถบเหนือบาร์โค้ด'; res.ocr.prodDate = dt; }
+        });
+      }
+      if (miss.length && results.length < MAX_FRAMES && state.engine === 'ready') return sleep(250).then(attempt);
     });
   }
   return attempt().then(function () {
@@ -562,7 +629,7 @@ function updateNet(txt) {
 
 /* ================= sync to Google Sheets (Apps Script) ================= */
 var syncing = false;
-var APP_VER = 'v2-0.7';
+var APP_VER = 'v2-0.9';
 function postJSON(ep, obj) {
   if (!/^http:\/\/(127\.0\.0\.1|localhost)[:\/]/.test(ep) && !/^https:\/\/script\.google(usercontent)?\.com\/macros\/s\/[^\/]+\/exec$/.test(ep)) {
     return Promise.reject(new Error('ลิงก์ Apps Script ไม่ถูกต้อง: "' + String(ep).slice(0, 60) + '" ต้องขึ้นต้น https://script.google.com/macros/s/ และลงท้าย /exec (ดูช่องลิงก์ใน ตั้งค่าและทดสอบ และ endpoint ใน config.js)'));
@@ -678,4 +745,6 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 setTimeout(initEngine, 300);
 startCamera();
+window.__ts = { barcodeExtent: function () { return barcodeExtent($('video')); }, readDateStrip: function () { return readDateStrip($('video')); }, decodeNow: function () { var v = $('video'); return decodeVideoFrame(v) || decodeVideoBand(v); }, box: function () { return bcBox; }, setBox: function (b) { bcBox = b; }, crop: function () { var v = $('video'), r = ocrCropRect(v); return r ? [r, ocr(cropCanvas(v, r, OCR_MAX_SIDE))] : null; } };
 })();
+

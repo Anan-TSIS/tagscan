@@ -71,25 +71,15 @@ function parseTag(text, opts) {
   ocr.mat = g(/MAT\.?\s*NO[.:\s]*([0-9OoIlS]{8})(?![0-9])/i, true);
   ocr.batch = g(/BATCH\s*NO[.:\s]*([0-9OoIlS]{10})/i, true) || g(/\b(00\d{8})\b/);
   var sm = /SEQ[:\s]*([0-9OoIlS]{1,3})\s*[\/|]\s*([0-9OoIlS]{1,3})/i.exec(t);
+  if (!sm) sm = /(?:^|[^0-9.\/])(\d{1,3})\s*\/\s*(\d{1,3})(?![0-9.\/])/.exec(t);   // label garbled (e.g. "se: 1/7"): a lone N/M
   ocr.seq = sm ? parseInt(fixDigits(sm[1]), 10) : NaN;
   ocr.seqTotal = sm ? parseInt(fixDigits(sm[2]), 10) : NaN;
 
   // PROD.DATE: by label first, otherwise the first valid dd.mm.yyyy anywhere (the other date on the tag has no dots)
   var dm = /PROD\.?\s*DATE[:\s]*([0-9OoIlS]{1,2}\s*[.\-\/]\s*[0-9OoIlS]{1,2}\s*[.\-\/]\s*[0-9OoIlS]{4})/i.exec(t);
   ocr.prodDate = dm ? fixDigits(dm[1].replace(/\s/g, '').replace(/[\-\/]/g, '.')) : '';
-  if (!validDate(ocr.prodDate, opts.now)) {
-    var re = /([0-9OoIlS]{2})\s*[.\-\/]\s*([0-9OoIlS]{2})\s*[.\-\/]\s*([0-9OoIlS]{4})/g, m, found = '';
-    while ((m = re.exec(t))) {
-      var cand = fixDigits(m[1]) + '.' + fixDigits(m[2]) + '.' + fixDigits(m[3]);
-      if (!validDate(cand, opts.now)) continue;
-      // the bottom stamp "D 06.11.2026 T 14:22:06" (LOCATION / DELIVERY line) is a delivery date, never PROD.DATE
-      var ls = t.lastIndexOf('\n', m.index) + 1, le = t.indexOf('\n', re.lastIndex); if (le < 0) le = t.length;
-      var line = t.slice(ls, le), after = t.slice(re.lastIndex, re.lastIndex + 14);
-      if (/LOCATION|DELIVERY|\bD\s*$/i.test(line.slice(0, m.index - ls + 2)) || /^\s*[TtI7]\s*\d{1,2}\s*[:.;]\s*\d{2}/.test(after)) continue;
-      found = cand; break;
-    }
-    if (found) { ocr.prodDate = found; ocr.prodDateFallback = true; }
-  }
+  // PROD.DATE is taken only from the line labelled PROD.DATE (the line above the barcode). No guessing from other places on the tag;
+  // the app re-reads the strip above the barcode when the label line is unreadable.
 
   // PROD.NO: any 11 digits
   // an 11-digit run that is just a slice of the barcode / its digit line is not the PROD.NO
